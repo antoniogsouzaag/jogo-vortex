@@ -89,7 +89,8 @@ class ParticleSystem {
     ctx.globalCompositeOperation = 'source-over';
   }
 }
-const particles = new ParticleSystem();
+// menos partículas em dispositivos de toque (GPU móvel)
+const particles = new ParticleSystem(Input.coarse ? 1600 : 3200);
 
 // ---------- emissores prontos ----------
 function fxExplosion(x, y, color, scale = 1) {

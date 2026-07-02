@@ -12,6 +12,9 @@ let W = 0, H = 0, DPR = 1;
 let grid = null, starfield = null, vignetteCanvas = null;
 let player = null, director = null;
 
+// recortes de tela (notch / indicador de home no iPhone)
+const SAFE = { t: 0, b: 0, l: 0, r: 0 };
+
 const game = {
   state: 'menu',
   time: 0, rdt: 0.016, runTime: 0, overAt: 0,
@@ -24,7 +27,7 @@ const game = {
   flash: { r: 255, g: 255, b: 255, a: 0 },
   banner: null,
   boss: null,
-  pendingLevels: 0, luChoices: null, luRects: null,
+  pendingLevels: 0, luChoices: null, luRects: null, luAt: 0,
   waveMods: { hp: 1, spd: 1 },
   stats: { shots: 0, hits: 0 },
   volRect: null, muteRect: null, volDrag: false, goMenuRect: null,
@@ -76,6 +79,7 @@ const game = {
     this.state = 'gameover';
     this.overAt = this.time;
     this.slowT = 1.4;
+    buzz(90);
     this.addShake(1);
     fxExplosion(player.x, player.y, COL.player, 3);
     fxExplosion(player.x, player.y, '#ffffff', 1.6);
@@ -95,17 +99,23 @@ const game = {
 function resize() {
   W = innerWidth; H = innerHeight;
   // em telas de toque, limita mais o DPI para manter 60 fps
-  DPR = Math.min(window.devicePixelRatio || 1, Input.coarse ? 1.5 : 1.75);
+  DPR = Math.min(window.devicePixelRatio || 1, Input.coarse ? 1.35 : 1.75);
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  const spacing = clamp(Math.round(W / 34), 38, 54);
+  // malha mais espaçada no celular = menos pontos para simular/desenhar
+  const spacing = clamp(Math.round(W / 34), Input.coarse ? 44 : 38, 54);
   if (!grid) grid = new Grid(W, H, spacing); else grid.build(W, H, spacing);
   if (!starfield) starfield = new Starfield(W, H); else starfield.resize(W, H);
   vignetteCanvas = makeVignette(W, H);
-  Input.layoutTouch(W, H);
+  const cs = getComputedStyle(document.documentElement);
+  SAFE.t = parseFloat(cs.getPropertyValue('--sat')) || 0;
+  SAFE.b = parseFloat(cs.getPropertyValue('--sab')) || 0;
+  SAFE.l = parseFloat(cs.getPropertyValue('--sal')) || 0;
+  SAFE.r = parseFloat(cs.getPropertyValue('--sar')) || 0;
+  Input.layoutTouch(W, H, SAFE);
 }
 
 // ---------- ciclo de vida ----------
@@ -130,6 +140,10 @@ function startGame() {
   game.state = 'playing';
   game.setBanner('PROTOCOLO VÓRTEX', 'sobreviva ao colapso', 2.4);
 }
+
+// atraso antes de aceitar reinício no fim de jogo — maior no toque,
+// para toques frenéticos da partida não pularem a tela de morte
+function overDelay() { return Input.touchMode ? 1.5 : 0.8; }
 
 // ---------- volume ----------
 function nudgeVolume(d) {
@@ -226,6 +240,7 @@ function update(dt, rdt) {
         game.pendingLevels--;
         game.luChoices = rollUpgrades(3);
         game.state = 'levelup';
+        game.luAt = game.time;
         AudioSys.levelup();
         game.flashScreen(120, 255, 220, 0.15);
       }
@@ -253,11 +268,14 @@ function update(dt, rdt) {
               Input.mouse.y >= r.y && Input.mouse.y <= r.y + r.h) chosen = r.u;
         }
       }
-      if (chosen) {
+      // trava curta: ignora toques em trânsito no instante em que as
+      // cartas aparecem (evita escolher carta sem querer no celular)
+      if (chosen && game.time - game.luAt > 0.3) {
         applyUpgrade(chosen);
         if (game.pendingLevels > 0) {
           game.pendingLevels--;
           game.luChoices = rollUpgrades(3);
+          game.luAt = game.time;
         } else {
           game.state = 'playing';
         }
@@ -270,7 +288,7 @@ function update(dt, rdt) {
       updateEBullets(dt);
       updateGems(dt);
       updateVortices(dt);
-      if (game.time - game.overAt > 0.8) {
+      if (game.time - game.overAt > overDelay()) {
         let restart = Input.was('Enter') || Input.was('Space');
         let toMenu = Input.was('Escape');
         if (Input.was('Mouse0')) {
@@ -381,4 +399,6 @@ addEventListener('blur', () => { if (game.state === 'playing') game.state = 'pau
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && game.state === 'playing') game.state = 'paused';
 });
+// iOS antigo: bloqueia o gesto de pinça sobre o jogo
+document.addEventListener('gesturestart', e => e.preventDefault());
 requestAnimationFrame(frame);

@@ -146,9 +146,11 @@ class Player {
       grid.shock(this.x, this.y, 150, 230);
     }
 
-    // câmbio temporal (câmera lenta)
+    // câmbio temporal (câmera lenta) — histerese: precisa de 12 de energia
+    // para ligar, desliga abaixo de 1 (evita liga/desliga em rajada no limite)
     const wantFocus = Input.down('ShiftLeft') || Input.down('ShiftRight');
-    if (wantFocus && this.energy > 1) {
+    const canFocus = this.focus ? this.energy > 1 : this.energy > 12;
+    if (wantFocus && canFocus) {
       if (!this.focus) { this.focus = true; AudioSys.focusOn(); }
       this.energy -= 26 * rdt;
     } else if (this.focus) {
@@ -213,6 +215,7 @@ class Player {
     if (this.inv > 0 || this.dashT > 0 || game.state !== 'playing') return;
     this.hp -= dmg;
     this.inv = 1.0;
+    buzz(35);
     game.addShake(0.7);
     game.flashScreen(255, 40, 60, 0.28);
     game.hitStop = Math.max(game.hitStop, 0.05);

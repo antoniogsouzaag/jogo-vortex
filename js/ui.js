@@ -46,14 +46,15 @@ function wrapText(ctx, text, maxW, font) {
 // ---------- HUD durante o jogo ----------
 function drawHUD(ctx) {
   const p = player;
-  // casco
+  const bottomY = H - 14 - SAFE.b; // acima do indicador de home (iPhone)
+  // casco (barras encolhem em telas estreitas para não invadir o centro)
   const hpFrac = p.hp / p.maxHp;
   const hpCol = hpFrac > 0.5 ? '#4dffa9' : hpFrac > 0.25 ? '#ffd54d' : '#ff4d6b';
-  bar(ctx, 20, 18, 230, 15, hpFrac, hpCol, 'CASCO ' + Math.ceil(p.hp) + '/' + p.maxHp);
+  bar(ctx, 20, 18, Math.min(230, W * 0.42), 15, hpFrac, hpCol, 'CASCO ' + Math.ceil(p.hp) + '/' + p.maxHp);
   // energia
-  bar(ctx, 20, 38, 180, 9, p.energy / p.maxEnergy, COL.player);
+  bar(ctx, 20, 38, Math.min(180, W * 0.33), 9, p.energy / p.maxEnergy, COL.player);
   // dash
-  bar(ctx, 20, 52, 120, 5, 1 - clamp(p.dashCd / p.stats.dashCdMax, 0, 1), '#9db4ff');
+  bar(ctx, 20, 52, Math.min(120, W * 0.22), 5, 1 - clamp(p.dashCd / p.stats.dashCdMax, 0, 1), '#9db4ff');
 
   // pontuação
   txt(ctx, 'PONTOS', W - 20, 26, 12, 'rgba(255,255,255,0.5)', 'right');
@@ -65,16 +66,22 @@ function drawHUD(ctx) {
     ctx.fillStyle = mc;
     ctx.fillRect(W - 80, 80, 60 * clamp(game.comboT / 3.5, 0, 1), 3);
   }
-  if (Input.touchMode) txt(ctx, 'RECORDE ' + fmtScore(game.best), W / 2, H - 14, 11, 'rgba(255,255,255,0.35)', 'center');
-  else txt(ctx, 'RECORDE ' + fmtScore(game.best), W - 20, H - 14, 11, 'rgba(255,255,255,0.35)', 'right');
+  // onda: em telas estreitas vai para a linha de baixo (o topo é
+  // ocupado pelas barras à esquerda e pela pontuação à direita)
+  const waveStr = director ? 'ONDA ' + Math.max(1, director.wave) : '';
+  const recStr = 'RECORDE ' + fmtScore(game.best);
+  if (W >= 640 && waveStr) txt(ctx, waveStr, W / 2, 28, 15, 'rgba(255,255,255,0.6)', 'center');
+  if (Input.touchMode) {
+    txt(ctx, (W < 640 && waveStr) ? waveStr + '  ·  ' + recStr : recStr, W / 2, bottomY, 11, 'rgba(255,255,255,0.4)', 'center');
+  } else {
+    txt(ctx, recStr, W - 20, bottomY, 11, 'rgba(255,255,255,0.35)', 'right');
+    if (W < 640 && waveStr) txt(ctx, waveStr, W / 2, bottomY, 11, 'rgba(255,255,255,0.4)', 'center');
+  }
 
-  // onda
-  if (director) txt(ctx, 'ONDA ' + Math.max(1, director.wave), W / 2, 28, 15, 'rgba(255,255,255,0.6)', 'center');
-
-  // barra do chefe
+  // barra do chefe (mais larga no celular para continuar legível)
   if (game.boss && game.boss.vulnerable) {
     const B = game.boss;
-    const bw = Math.min(560, W * 0.5);
+    const bw = Math.min(560, W * 0.7);
     txt(ctx, B.name, W / 2, 54, 13, B.phaseColor(), 'center');
     bar(ctx, W / 2 - bw / 2, 60, bw, 10, B.hp / B.maxHp, B.phaseColor());
   }
@@ -84,9 +91,9 @@ function drawHUD(ctx) {
   ctx.fillRect(0, H - 6, W, 6);
   ctx.fillStyle = COL.xp;
   ctx.fillRect(0, H - 6, W * clamp(p.xp / p.xpNext, 0, 1), 6);
-  txt(ctx, 'NV ' + p.level, 12, H - 14, 13, COL.xp);
+  txt(ctx, 'NV ' + p.level, 12, bottomY, 13, COL.xp);
 
-  if (!Input.touchMode) txt(ctx, '[M] som  [-/+] volume  [P] pausa', 78, H - 14, 10, 'rgba(255,255,255,0.25)');
+  if (!Input.touchMode) txt(ctx, '[M] som  [-/+] volume  [P] pausa', 78, bottomY, 10, 'rgba(255,255,255,0.25)');
 
   drawTouchControls(ctx);
 }
@@ -238,11 +245,12 @@ function drawMenu(ctx) {
     ['BOTÃO DIREITO / Q', 'pulso gravitacional'],
   ];
   const rowSize = Math.min(15, W * 0.032);
+  const rowStep = Math.min(26, H * 0.042); // comprime em telas baixas
   let y = H * 0.52;
   for (const [key, desc] of rows) {
     txt(ctx, key, cx - 10, y, rowSize, COL.player, 'right');
     txt(ctx, desc, cx + 10, y, rowSize, 'rgba(255,255,255,0.75)');
-    y += 26;
+    y += rowStep;
   }
   if (Input.touchMode) txt(ctx, 'sem mirar, a nave atira sozinha no alvo mais próximo', cx, y + 4, 11, 'rgba(160,220,255,0.55)', 'center');
 
@@ -252,10 +260,10 @@ function drawMenu(ctx) {
   txt(ctx, Input.touchMode ? '— TOQUE PARA INICIAR —' : '— CLIQUE PARA INICIAR —',
     cx, H * 0.82, 19, 'rgba(255,255,255,' + (0.4 + blink * 0.6) + ')', 'center');
 
-  drawVolumeControl(ctx, H - 52);
+  drawVolumeControl(ctx, H - 52 - SAFE.b);
 
   txt(ctx, 'arte, física e áudio 100% procedurais — sem engine, sem bibliotecas, sem assets',
-    cx, H - 18, 11, 'rgba(255,255,255,0.3)', 'center');
+    cx, H - 18 - SAFE.b, 11, 'rgba(255,255,255,0.3)', 'center');
 }
 
 // ---------- cartas de melhoria ----------
@@ -402,11 +410,11 @@ function drawGameOver(ctx) {
   }
 
   game.goMenuRect = null;
-  if (game.time - game.overAt > 0.8) {
+  if (game.time - game.overAt > overDelay()) {
     const blink = 0.5 + 0.5 * Math.sin(game.time * 3.5);
     // botões clicáveis/tocáveis
     const bw = Math.min(170, W * 0.38), bh = 44, gap = 16;
-    const by = Math.min(H * 0.78, H - 70);
+    const by = Math.min(H * 0.78, H - 70 - SAFE.b);
     const rx = W / 2 - bw - gap / 2, mx2 = W / 2 + gap / 2;
     game.goMenuRect = { x: mx2, y: by, w: bw, h: bh };
 

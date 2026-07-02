@@ -19,6 +19,8 @@ const mtof    = m => 440 * Math.pow(2, (m - 69) / 12); // nota MIDI -> Hz
 const easeOutCubic = k => 1 - Math.pow(1 - k, 3);
 const easeOutBack  = k => { const c = 1.70158; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
 
+const buzz = ms => { if (navigator.vibrate) try { navigator.vibrate(ms); } catch (e) {} };
+
 const fmtScore = n => Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const fmtTime  = s => { const m = Math.floor(s / 60), r = Math.floor(s % 60); return m + ':' + (r < 10 ? '0' : '') + r; };
 
