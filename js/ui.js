@@ -103,6 +103,27 @@ function drawTouchControls(ctx) {
   if (!Input.touchMode) return;
   ctx.save();
 
+  // dicas de onde tocar, nos primeiros segundos da partida
+  if (game.state === 'playing' && game.runTime < 7) {
+    const a = clamp(7 - game.runTime, 0, 1) * 0.4;
+    const hy = H - SAFE.b - Input.stickR - 150;
+    const hints = [
+      [Input.move, W * 0.25, 'MOVER'],
+      [Input.aim,  W * 0.75, 'MIRAR · ATIRAR'],
+    ];
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 8]);
+    for (const [s, hx, label] of hints) {
+      if (s.id >= 0) continue; // some assim que o jogador usa
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = 'rgba(140,220,255,0.9)';
+      ctx.beginPath(); ctx.arc(hx, hy, Input.stickR * 0.85, 0, TAU); ctx.stroke();
+      txt(ctx, label, hx, hy + Input.stickR * 0.85 + 20, 12, 'rgba(160,220,255,0.9)', 'center', false, a);
+    }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
   // direcionais flutuantes
   for (const s of [Input.move, Input.aim]) {
     if (s.id < 0) continue;
@@ -264,6 +285,7 @@ function drawMenu(ctx) {
 
   txt(ctx, 'arte, física e áudio 100% procedurais — sem engine, sem bibliotecas, sem assets',
     cx, H - 18 - SAFE.b, 11, 'rgba(255,255,255,0.3)', 'center');
+  txt(ctx, 'v3', 12, H - 18 - SAFE.b, 10, 'rgba(255,255,255,0.3)');
 }
 
 // ---------- cartas de melhoria ----------

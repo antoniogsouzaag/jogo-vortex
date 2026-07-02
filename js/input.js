@@ -4,6 +4,10 @@
 // Toque: dois direcionais virtuais flutuantes (esquerda move,
 // direita mira/atira) e botões de ação (dash, pulso, foco,
 // pausa). Fora do jogo, toques viram cliques de interface.
+//
+// O toque usa Pointer Events (padrão moderno, confiável em
+// todos os navegadores móveis); Touch Events ficam só como
+// fallback para navegadores antigos sem PointerEvent.
 // ============================================================
 
 const Input = {
@@ -29,8 +33,10 @@ const Input = {
     addEventListener('keyup', e => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
 
-    // alguns navegadores móveis disparam eventos de mouse sintéticos
-    // após o toque mesmo com preventDefault — ignora mouse logo após toque
+    // mouse clássico (dispara por botão — necessário para atirar e
+    // usar o pulso ao mesmo tempo). Alguns navegadores móveis geram
+    // eventos de mouse sintéticos após o toque mesmo com
+    // preventDefault — o guard de 500ms os descarta.
     canvas.addEventListener('mousemove', e => {
       if (performance.now() - this._lastTouchT < 500) return;
       const r = canvas.getBoundingClientRect();
@@ -49,10 +55,23 @@ const Input = {
     });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    canvas.addEventListener('touchstart', e => this._ts(e, canvas), { passive: false });
-    canvas.addEventListener('touchmove',  e => this._tm(e, canvas), { passive: false });
-    addEventListener('touchend',    e => this._te(e));
-    addEventListener('touchcancel', e => this._te(e));
+    if (window.PointerEvent) {
+      // caminho principal: Pointer Events (toque e caneta)
+      canvas.addEventListener('pointerdown', e => this._pd(e, canvas));
+      canvas.addEventListener('pointermove', e => this._pm(e, canvas));
+      addEventListener('pointerup', e => this._pu(e));
+      addEventListener('pointercancel', e => this._pu(e));
+      // ainda é preciso cancelar os Touch Events para bloquear
+      // rolagem, zoom e cliques sintéticos do navegador
+      canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+      canvas.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
+    } else {
+      // fallback: Touch Events clássicos
+      canvas.addEventListener('touchstart', e => this._ts(e, canvas), { passive: false });
+      canvas.addEventListener('touchmove',  e => this._tm(e, canvas), { passive: false });
+      addEventListener('touchend',    e => this._te(e));
+      addEventListener('touchcancel', e => this._te(e));
+    }
   },
 
   // posiciona botões de toque; chamado a cada resize.
@@ -81,65 +100,97 @@ const Input = {
     return null;
   },
 
-  _ts(e, canvas) {
-    e.preventDefault();
+  // ---------- lógica compartilhada de toque ----------
+  _touchStart(id, x, y) {
     this.touchMode = true;
     this._lastTouchT = performance.now();
     AudioSys.init();
-    const r = canvas.getBoundingClientRect();
-    for (const t of e.changedTouches) {
-      const x = t.clientX - r.left, y = t.clientY - r.top;
-      if (this._playing()) {
-        const b = this._hitButton(x, y);
-        if (b) {
-          b.tid = t.identifier;
-          if (b.hold) this.keys.add(b.code); else this.pressed.add(b.code);
-        } else if (x < innerWidth * 0.5) {
-          // lado esquerdo é só movimento: um 2º toque à esquerda não pode
-          // virar mira (evita tiros fantasma de palma/apoio da mão)
-          if (this.move.id < 0) {
-            this.move.id = t.identifier;
-            this.move.ox = this.move.x = x;
-            this.move.oy = this.move.y = y;
-          }
-        } else if (this.aim.id < 0) {
-          this.aim.id = t.identifier;
-          this.aim.ox = this.aim.x = x;
-          this.aim.oy = this.aim.y = y;
+    if (this._playing()) {
+      const b = this._hitButton(x, y);
+      if (b) {
+        b.tid = id;
+        if (b.hold) this.keys.add(b.code); else this.pressed.add(b.code);
+      } else if (x < innerWidth * 0.5) {
+        // lado esquerdo é só movimento: um 2º toque à esquerda não pode
+        // virar mira (evita tiros fantasma de palma/apoio da mão)
+        if (this.move.id < 0) {
+          this.move.id = id;
+          this.move.ox = this.move.x = x;
+          this.move.oy = this.move.y = y;
         }
-      } else {
-        this.uiTouch = t.identifier;
-        this.mouse.x = x; this.mouse.y = y;
-        this.mouse.down = true;
-        this.pressed.add('Mouse0');
+      } else if (this.aim.id < 0) {
+        this.aim.id = id;
+        this.aim.ox = this.aim.x = x;
+        this.aim.oy = this.aim.y = y;
       }
+    } else {
+      this.uiTouch = id;
+      this.mouse.x = x; this.mouse.y = y;
+      this.mouse.down = true;
+      this.pressed.add('Mouse0');
+    }
+  },
+
+  _touchMove(id, x, y) {
+    this._lastTouchT = performance.now();
+    if (id === this.move.id) { this.move.x = x; this.move.y = y; }
+    else if (id === this.aim.id) { this.aim.x = x; this.aim.y = y; }
+    else if (id === this.uiTouch) { this.mouse.x = x; this.mouse.y = y; }
+  },
+
+  _touchEnd(id) {
+    this._lastTouchT = performance.now();
+    if (id === this.move.id) this.move.id = -1;
+    else if (id === this.aim.id) this.aim.id = -1;
+    else if (id === this.uiTouch) { this.uiTouch = -1; this.mouse.down = false; }
+    for (const b of this.buttons) {
+      if (b.tid === id) {
+        b.tid = -1;
+        if (b.hold) this.keys.delete(b.code);
+      }
+    }
+  },
+
+  // ---------- Pointer Events (caminho principal) ----------
+  _pd(e, canvas) {
+    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+    const r = canvas.getBoundingClientRect();
+    this._touchStart(e.pointerId, e.clientX - r.left, e.clientY - r.top);
+  },
+
+  _pm(e, canvas) {
+    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+    const r = canvas.getBoundingClientRect();
+    this._touchMove(e.pointerId, e.clientX - r.left, e.clientY - r.top);
+  },
+
+  _pu(e) {
+    if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+    this._touchEnd(e.pointerId);
+  },
+
+  // ---------- Touch Events (fallback) ----------
+  _ts(e, canvas) {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      this._touchStart(t.identifier, t.clientX - r.left, t.clientY - r.top);
     }
   },
 
   _tm(e, canvas) {
     e.preventDefault();
-    this._lastTouchT = performance.now();
     const r = canvas.getBoundingClientRect();
-    for (const t of e.changedTouches) {
-      const x = t.clientX - r.left, y = t.clientY - r.top;
-      if (t.identifier === this.move.id) { this.move.x = x; this.move.y = y; }
-      else if (t.identifier === this.aim.id) { this.aim.x = x; this.aim.y = y; }
-      else if (t.identifier === this.uiTouch) { this.mouse.x = x; this.mouse.y = y; }
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      this._touchMove(t.identifier, t.clientX - r.left, t.clientY - r.top);
     }
   },
 
   _te(e) {
-    this._lastTouchT = performance.now();
-    for (const t of e.changedTouches) {
-      if (t.identifier === this.move.id) this.move.id = -1;
-      else if (t.identifier === this.aim.id) this.aim.id = -1;
-      else if (t.identifier === this.uiTouch) { this.uiTouch = -1; this.mouse.down = false; }
-      for (const b of this.buttons) {
-        if (b.tid === t.identifier) {
-          b.tid = -1;
-          if (b.hold) this.keys.delete(b.code);
-        }
-      }
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      this._touchEnd(e.changedTouches[i].identifier);
     }
   },
 
