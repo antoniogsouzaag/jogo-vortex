@@ -27,6 +27,7 @@ const game = {
   pendingLevels: 0, luChoices: null, luRects: null,
   waveMods: { hp: 1, spd: 1 },
   stats: { shots: 0, hits: 0 },
+  volRect: null, muteRect: null, volDrag: false, goMenuRect: null,
 
   addShake(v) { this.shake = Math.min(1, this.shake + v); },
   flashScreen(r, g, b, a) { this.flash = { r, g, b, a }; },
@@ -93,7 +94,8 @@ const game = {
 // ---------- dimensionamento ----------
 function resize() {
   W = innerWidth; H = innerHeight;
-  DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+  // em telas de toque, limita mais o DPI para manter 60 fps
+  DPR = Math.min(window.devicePixelRatio || 1, Input.coarse ? 1.5 : 1.75);
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
   canvas.style.width = W + 'px';
@@ -103,6 +105,7 @@ function resize() {
   if (!grid) grid = new Grid(W, H, spacing); else grid.build(W, H, spacing);
   if (!starfield) starfield = new Starfield(W, H); else starfield.resize(W, H);
   vignetteCanvas = makeVignette(W, H);
+  Input.layoutTouch(W, H);
 }
 
 // ---------- ciclo de vida ----------
@@ -128,13 +131,44 @@ function startGame() {
   game.setBanner('PROTOCOLO VÓRTEX', 'sobreviva ao colapso', 2.4);
 }
 
+// ---------- volume ----------
+function nudgeVolume(d) {
+  const v = AudioSys.setVolume(clamp(AudioSys.volume + d, 0, 1));
+  addFloater(W / 2, H - 60, 'VOLUME ' + Math.round(v * 100) + '%', '#8ef7ff', 14);
+}
+
+// trata cliques/arrastes no slider de volume e no ícone de mudo.
+// Retorna true quando o clique foi consumido pela interface de som.
+function volumeUIHandled() {
+  const vr = game.volRect, mr = game.muteRect;
+  let used = false;
+  if (Input.was('Mouse0')) {
+    const mx = Input.mouse.x, my = Input.mouse.y;
+    if (mr && mx >= mr.x && mx <= mr.x + mr.w && my >= mr.y && my <= mr.y + mr.h) {
+      const m = AudioSys.toggleMute();
+      addFloater(mr.x + mr.w / 2, mr.y - 6, m ? 'MUDO' : 'SOM LIGADO', '#8ef7ff', 12);
+      used = true;
+    } else if (vr && mx >= vr.x - 16 && mx <= vr.x + vr.w + 16 && my >= vr.y - 12 && my <= vr.y + vr.h + 12) {
+      game.volDrag = true;
+    }
+  }
+  if (game.volDrag) {
+    used = true;
+    if (Input.mouse.down && vr) AudioSys.setVolume(clamp((Input.mouse.x - vr.x) / vr.w, 0, 1));
+    else game.volDrag = false;
+  }
+  return used;
+}
+
 // ---------- atualização ----------
 function update(dt, rdt) {
-  // som liga/desliga em qualquer estado
+  // som liga/desliga e volume em qualquer estado
   if (Input.was('KeyM')) {
     const m = AudioSys.toggleMute();
     addFloater(W / 2, H - 60, m ? 'SOM DESLIGADO' : 'SOM LIGADO', '#8ef7ff', 14);
   }
+  if (Input.was('Minus') || Input.was('NumpadSubtract')) nudgeVolume(-0.1);
+  if (Input.was('Equal') || Input.was('NumpadAdd')) nudgeVolume(0.1);
 
   // efeitos sempre animam
   grid.update(dt);
@@ -153,7 +187,8 @@ function update(dt, rdt) {
           color: pick([COL.player, COL.vortex, COL.drifter]), size: 3, life: rand(1, 2), drag: 1,
         });
       }
-      if (Input.was('Mouse0') || Input.was('Enter') || Input.was('Space')) {
+      const uiUsed = volumeUIHandled();
+      if (Input.was('Enter') || Input.was('Space') || (!uiUsed && Input.was('Mouse0'))) {
         AudioSys.init();
         startGame();
       }
@@ -198,7 +233,12 @@ function update(dt, rdt) {
     }
 
     case 'paused': {
-      if (Input.was('Escape') || Input.was('KeyP')) game.state = 'playing';
+      const uiUsed = volumeUIHandled();
+      if (Input.was('Escape') || Input.was('KeyP') ||
+          (Input.touchMode && !uiUsed && Input.was('Mouse0'))) {
+        game.volDrag = false;
+        game.state = 'playing';
+      }
       break;
     }
 
@@ -231,8 +271,16 @@ function update(dt, rdt) {
       updateGems(dt);
       updateVortices(dt);
       if (game.time - game.overAt > 0.8) {
-        if (Input.was('Enter') || Input.was('Mouse0') || Input.was('Space')) startGame();
-        else if (Input.was('Escape')) game.state = 'menu';
+        let restart = Input.was('Enter') || Input.was('Space');
+        let toMenu = Input.was('Escape');
+        if (Input.was('Mouse0')) {
+          const r = game.goMenuRect;
+          if (r && Input.mouse.x >= r.x && Input.mouse.x <= r.x + r.w &&
+              Input.mouse.y >= r.y && Input.mouse.y <= r.y + r.h) toMenu = true;
+          else restart = true;
+        }
+        if (toMenu) game.state = 'menu';
+        else if (restart) startGame();
       }
       break;
     }
@@ -300,6 +348,8 @@ function render() {
 let _last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
+  // alguns navegadores móveis não disparam 'resize' de forma confiável
+  if (W !== innerWidth || H !== innerHeight) resize();
   const rdt = clamp((now - _last) / 1000, 0.0001, 0.05);
   _last = now;
   game.rdt = rdt;
@@ -324,7 +374,11 @@ function frame(now) {
 Input.init(canvas);
 resize();
 addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 200));
 addEventListener('pointerdown', () => AudioSys.init());
 addEventListener('keydown', () => AudioSys.init());
 addEventListener('blur', () => { if (game.state === 'playing') game.state = 'paused'; });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && game.state === 'playing') game.state = 'paused';
+});
 requestAnimationFrame(frame);

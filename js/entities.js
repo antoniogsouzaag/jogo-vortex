@@ -58,6 +58,19 @@ class SpatialHash {
 const enemyHash = new SpatialHash(90);
 const _qbuf = [];
 
+// alvo mais próximo (inimigos e chefe) — usado pela mira assistida no toque
+function nearestTarget(x, y, range) {
+  let best = null, bd = range * range;
+  for (const e of enemies) {
+    if (e.dead || e.spawnT > 0) continue;
+    const d = dist2(x, y, e.x, e.y);
+    if (d < bd) { bd = d; best = e; }
+  }
+  const B = game.boss;
+  if (B && !B.dead && B.vulnerable && dist2(x, y, B.x, B.y) < bd) best = B;
+  return best;
+}
+
 // ---------- jogador ----------
 function xpFor(l) { return Math.floor(10 + l * 7 + l * l * 0.6); }
 
@@ -84,13 +97,29 @@ class Player {
 
   update(dt) {
     const rdt = game.rdt;
-    this.angle = angleTo(this.x, this.y, Input.mouse.x, Input.mouse.y);
 
-    // movimento
+    // mira: toque usa o direcional direito (ou mira assistida); desktop usa o mouse
+    let autoFire = false;
+    if (Input.touchMode) {
+      const av = Input.aimVec();
+      if (av.mag > 0.25) {
+        this.angle = Math.atan2(av.y, av.x);
+        autoFire = true;
+      } else {
+        const tgt = nearestTarget(this.x, this.y, 900);
+        if (tgt) { this.angle = angleTo(this.x, this.y, tgt.x, tgt.y); autoFire = true; }
+      }
+    } else {
+      this.angle = angleTo(this.x, this.y, Input.mouse.x, Input.mouse.y);
+    }
+
+    // movimento (teclado + direcional analógico; magnitude < 1 preservada)
     let mx = (Input.down('KeyD') || Input.down('ArrowRight') ? 1 : 0) - (Input.down('KeyA') || Input.down('ArrowLeft') ? 1 : 0);
     let my = (Input.down('KeyS') || Input.down('ArrowDown') ? 1 : 0) - (Input.down('KeyW') || Input.down('ArrowUp') ? 1 : 0);
-    const ml = Math.hypot(mx, my) || 1;
-    mx /= ml; my /= ml;
+    const tv = Input.moveVec();
+    mx += tv.x; my += tv.y;
+    const ml = Math.hypot(mx, my);
+    if (ml > 1) { mx /= ml; my /= ml; }
 
     if (this.dashT > 0) {
       this.dashT -= dt;
@@ -139,7 +168,8 @@ class Player {
 
     // tiro
     this.fireCd -= dt;
-    if (Input.mouse.down && this.fireCd <= 0 && this.dashT <= 0) this.fire();
+    const wantFire = autoFire || (!Input.touchMode && Input.mouse.down);
+    if (wantFire && this.fireCd <= 0 && this.dashT <= 0) this.fire();
 
     // integra e limita à arena
     this.x = clamp(this.x + this.vx * dt, 14, W - 14);

@@ -65,7 +65,8 @@ function drawHUD(ctx) {
     ctx.fillStyle = mc;
     ctx.fillRect(W - 80, 80, 60 * clamp(game.comboT / 3.5, 0, 1), 3);
   }
-  txt(ctx, 'RECORDE ' + fmtScore(game.best), W - 20, H - 14, 11, 'rgba(255,255,255,0.35)', 'right');
+  if (Input.touchMode) txt(ctx, 'RECORDE ' + fmtScore(game.best), W / 2, H - 14, 11, 'rgba(255,255,255,0.35)', 'center');
+  else txt(ctx, 'RECORDE ' + fmtScore(game.best), W - 20, H - 14, 11, 'rgba(255,255,255,0.35)', 'right');
 
   // onda
   if (director) txt(ctx, 'ONDA ' + Math.max(1, director.wave), W / 2, 28, 15, 'rgba(255,255,255,0.6)', 'center');
@@ -85,7 +86,106 @@ function drawHUD(ctx) {
   ctx.fillRect(0, H - 6, W * clamp(p.xp / p.xpNext, 0, 1), 6);
   txt(ctx, 'NV ' + p.level, 12, H - 14, 13, COL.xp);
 
-  txt(ctx, '[M] som  [P] pausa', 20, H - 14, 10, 'rgba(255,255,255,0.25)');
+  if (!Input.touchMode) txt(ctx, '[M] som  [-/+] volume  [P] pausa', 78, H - 14, 10, 'rgba(255,255,255,0.25)');
+
+  drawTouchControls(ctx);
+}
+
+// ---------- controles de toque (direcionais e botões) ----------
+function drawTouchControls(ctx) {
+  if (!Input.touchMode) return;
+  ctx.save();
+
+  // direcionais flutuantes
+  for (const s of [Input.move, Input.aim]) {
+    if (s.id < 0) continue;
+    const R = Input.stickR;
+    let dx = s.x - s.ox, dy = s.y - s.oy;
+    const m = Math.hypot(dx, dy);
+    if (m > R) { dx = dx / m * R; dy = dy / m * R; }
+    ctx.strokeStyle = 'rgba(140,220,255,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(s.ox, s.oy, R, 0, TAU); ctx.stroke();
+    ctx.fillStyle = 'rgba(140,220,255,0.22)';
+    ctx.beginPath(); ctx.arc(s.ox + dx, s.oy + dy, 22, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,240,255,0.55)';
+    ctx.beginPath(); ctx.arc(s.ox + dx, s.oy + dy, 22, 0, TAU); ctx.stroke();
+  }
+
+  // botões de ação
+  for (const b of Input.buttons) {
+    let alpha = 0.55, ring = -1;
+    if (b.code === 'Space' && player) {
+      const k = 1 - clamp(player.dashCd / player.stats.dashCdMax, 0, 1);
+      if (k < 1) ring = k;
+      alpha = k >= 1 ? 0.85 : 0.35;
+    } else if (b.code === 'KeyQ' && player) {
+      alpha = player.energy >= 30 ? 0.8 : 0.3;
+    } else if (b.code === 'ShiftLeft' && player) {
+      alpha = player.focus ? 0.95 : 0.5;
+    }
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(10,22,40,0.6)';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+    ctx.strokeStyle = COL.player;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.stroke();
+    if (ring >= 0) {
+      ctx.strokeStyle = '#9db4ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r - 4, -Math.PI / 2, -Math.PI / 2 + ring * TAU); ctx.stroke();
+    }
+    if (b.icon === 'pause') {
+      ctx.fillStyle = '#cfeaff';
+      ctx.fillRect(b.x - 6, b.y - 7, 4, 14);
+      ctx.fillRect(b.x + 2, b.y - 7, 4, 14);
+    } else {
+      txt(ctx, b.label, b.x, b.y + 4, Math.max(10, Math.round(b.r * 0.3)), '#cfeaff', 'center', false, alpha);
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+// ---------- controle de volume (menu e pausa) ----------
+function drawVolumeControl(ctx, cy) {
+  const w = Math.min(240, W * 0.55), h = 6;
+  const x = W / 2 - w / 2, y = cy;
+  const v = AudioSys.volume;
+  game.volRect = { x, y: y - 7, w, h: h + 14 };
+
+  // ícone de alto-falante (liga/desliga o som)
+  const ix = x - 42, iy = y + h / 2;
+  game.muteRect = { x: ix - 16, y: iy - 16, w: 32, h: 32 };
+  const on = !AudioSys.muted && v > 0;
+  ctx.save();
+  ctx.strokeStyle = ctx.fillStyle = on ? 'rgba(160,220,255,0.9)' : 'rgba(255,93,125,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(ix - 8, iy - 4); ctx.lineTo(ix - 3, iy - 4); ctx.lineTo(ix + 3, iy - 9);
+  ctx.lineTo(ix + 3, iy + 9); ctx.lineTo(ix - 3, iy + 4); ctx.lineTo(ix - 8, iy + 4);
+  ctx.closePath(); ctx.fill();
+  if (on) {
+    ctx.beginPath(); ctx.arc(ix + 4, iy, 6, -0.9, 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ix + 4, iy, 10, -0.9, 0.9); ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(ix + 8, iy - 5); ctx.lineTo(ix + 16, iy + 5);
+    ctx.moveTo(ix + 16, iy - 5); ctx.lineTo(ix + 8, iy + 5);
+    ctx.stroke();
+  }
+
+  // trilho e preenchimento
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = on ? COL.player : 'rgba(255,255,255,0.3)';
+  ctx.fillRect(x, y, w * v, h);
+  ctx.fillStyle = '#eaffff';
+  ctx.beginPath(); ctx.arc(x + w * v, y + h / 2, 8, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  txt(ctx, 'VOLUME', x, y - 10, 10, 'rgba(255,255,255,0.45)');
+  txt(ctx, AudioSys.muted ? 'MUDO' : Math.round(v * 100) + '%', x + w + 14, y + h + 2, 11, 'rgba(255,255,255,0.6)');
 }
 
 // ---------- banner central ----------
@@ -124,24 +224,35 @@ function drawMenu(ctx) {
   txt(ctx, 'p r o t o c o l o   n e o n', cx, ty + 34, 15, 'rgba(160,220,255,0.85)', 'center');
 
   // controles
-  const rows = [
+  const rows = Input.touchMode ? [
+    ['ARRASTE À ESQUERDA', 'mover a nave'],
+    ['ARRASTE À DIREITA', 'mirar e atirar'],
+    ['DASH', 'investida evasiva'],
+    ['PULSO', 'pulso gravitacional'],
+    ['FOCO (segurar)', 'câmera lenta'],
+  ] : [
     ['WASD', 'mover'],
     ['MOUSE', 'mirar e atirar'],
     ['ESPAÇO', 'dash evasivo'],
     ['SHIFT', 'câmbio temporal (câmera lenta)'],
     ['BOTÃO DIREITO / Q', 'pulso gravitacional'],
   ];
+  const rowSize = Math.min(15, W * 0.032);
   let y = H * 0.52;
   for (const [key, desc] of rows) {
-    txt(ctx, key, cx - 14, y, 15, COL.player, 'right');
-    txt(ctx, desc, cx + 14, y, 15, 'rgba(255,255,255,0.75)');
+    txt(ctx, key, cx - 10, y, rowSize, COL.player, 'right');
+    txt(ctx, desc, cx + 10, y, rowSize, 'rgba(255,255,255,0.75)');
     y += 26;
   }
+  if (Input.touchMode) txt(ctx, 'sem mirar, a nave atira sozinha no alvo mais próximo', cx, y + 4, 11, 'rgba(160,220,255,0.55)', 'center');
 
-  if (game.best > 0) txt(ctx, 'RECORDE  ' + fmtScore(game.best), cx, y + 18, 16, '#ffd54d', 'center');
+  if (game.best > 0) txt(ctx, 'RECORDE  ' + fmtScore(game.best), cx, y + 26, 16, '#ffd54d', 'center');
 
   const blink = 0.5 + 0.5 * Math.sin(t * 3.5);
-  txt(ctx, '— CLIQUE PARA INICIAR —', cx, H * 0.82, 19, 'rgba(255,255,255,' + (0.4 + blink * 0.6) + ')', 'center');
+  txt(ctx, Input.touchMode ? '— TOQUE PARA INICIAR —' : '— CLIQUE PARA INICIAR —',
+    cx, H * 0.82, 19, 'rgba(255,255,255,' + (0.4 + blink * 0.6) + ')', 'center');
+
+  drawVolumeControl(ctx, H - 52);
 
   txt(ctx, 'arte, física e áudio 100% procedurais — sem engine, sem bibliotecas, sem assets',
     cx, H - 18, 11, 'rgba(255,255,255,0.3)', 'center');
@@ -152,17 +263,52 @@ function drawLevelUp(ctx) {
   ctx.fillStyle = 'rgba(2,4,12,0.78)';
   ctx.fillRect(0, 0, W, H);
 
+  const n = game.luChoices.length;
+  game.luRects = [];
+
+  // telas estreitas (celular em pé): cartas empilhadas em lista
+  if (W < 640 || H > W * 1.1) {
+    txt(ctx, 'MELHORIA DISPONÍVEL', W / 2, H * 0.12, Math.min(26, W * 0.062), '#eaffff', 'center', true);
+    txt(ctx, 'nível ' + player.level + ' — toque numa carta', W / 2, H * 0.12 + 22, 13, 'rgba(160,220,255,0.8)', 'center');
+    const cw = Math.min(430, W - 28);
+    const gap = 12;
+    const chh = clamp(Math.floor((H * 0.66 - (n - 1) * gap) / n), 80, 132);
+    const x = W / 2 - cw / 2;
+    let y = H * 0.18;
+    for (let i = 0; i < n; i++) {
+      const u = game.luChoices[i], rar = RARITY[u.rar];
+      game.luRects.push({ x, y, w: cw, h: chh, u });
+      ctx.fillStyle = 'rgba(8,12,26,0.96)';
+      ctx.fillRect(x, y, cw, chh);
+      ctx.strokeStyle = rar.color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, cw, chh);
+      txt(ctx, rar.name, x + cw - 12, y + 19, 10, rar.color, 'right');
+      txt(ctx, u.name, x + 14, y + 25, 17, '#ffffff', 'left', true);
+      const descLines = wrapText(ctx, u.desc, cw - 28, 'bold 13' + FONT_HUD);
+      let dy = y + 47;
+      for (const l of descLines) { txt(ctx, l, x + 14, dy, 13, 'rgba(210,230,255,0.9)'); dy += 17; }
+      const owned = player.upgrades[u.id] || 0;
+      if (u.max < 90) {
+        for (let s = 0; s < u.max; s++) {
+          ctx.fillStyle = s < owned ? rar.color : 'rgba(255,255,255,0.14)';
+          ctx.fillRect(x + 14 + s * 13, y + chh - 12, 9, 4);
+        }
+      }
+      y += chh + gap;
+    }
+    return;
+  }
+
   txt(ctx, 'MELHORIA DISPONÍVEL', W / 2, H * 0.2, Math.min(34, W * 0.045), '#eaffff', 'center', true);
   txt(ctx, 'nível ' + player.level + ' — escolha uma carta', W / 2, H * 0.2 + 26, 14, 'rgba(160,220,255,0.8)', 'center');
 
-  const n = game.luChoices.length;
   const cw = Math.min(250, (W - 120) / n);
-  const chh = 300;
+  const chh = Math.min(300, H - 100);
   const gap = 26;
   const totalW = n * cw + (n - 1) * gap;
   const x0 = W / 2 - totalW / 2;
   const y0 = H / 2 - chh / 2 + 30;
-  game.luRects = [];
 
   for (let i = 0; i < n; i++) {
     const u = game.luChoices[i];
@@ -210,7 +356,7 @@ function drawLevelUp(ctx) {
         ctx.fillRect(x + cw / 2 - u.max * 7 + s * 14, y + chh - 44, 10, 4);
       }
     }
-    txt(ctx, '[' + (i + 1) + ']', x + cw / 2, y + chh - 16, 14, 'rgba(255,255,255,0.5)', 'center');
+    if (!Input.touchMode) txt(ctx, '[' + (i + 1) + ']', x + cw / 2, y + chh - 16, 14, 'rgba(255,255,255,0.5)', 'center');
   }
 }
 
@@ -219,8 +365,8 @@ function drawPause(ctx) {
   ctx.fillStyle = 'rgba(2,4,12,0.65)';
   ctx.fillRect(0, 0, W, H);
   txt(ctx, 'PAUSADO', W / 2, H * 0.4, Math.min(48, W * 0.06), '#eaffff', 'center', true);
-  txt(ctx, 'ESC — continuar', W / 2, H * 0.5, 16, 'rgba(255,255,255,0.75)', 'center');
-  txt(ctx, 'M — som: ' + (AudioSys.muted ? 'DESLIGADO' : 'LIGADO'), W / 2, H * 0.5 + 28, 16, 'rgba(255,255,255,0.75)', 'center');
+  txt(ctx, Input.touchMode ? 'toque para continuar' : 'ESC — continuar', W / 2, H * 0.5, 16, 'rgba(255,255,255,0.75)', 'center');
+  drawVolumeControl(ctx, H * 0.58);
 }
 
 // ---------- fim de jogo ----------
@@ -247,17 +393,37 @@ function drawGameOver(ctx) {
     ['precisão', acc + '%'],
     ['tempo', fmtTime(game.runTime)],
   ];
-  let y = H * 0.52;
+  const step = Math.min(26, H * 0.05);
+  let y = H * 0.5;
   for (const [label, val] of rows) {
     txt(ctx, label, W / 2 - 16, y, 15, 'rgba(255,255,255,0.55)', 'right');
     txt(ctx, val, W / 2 + 16, y, 15, '#ffffff');
-    y += 26;
+    y += step;
   }
 
+  game.goMenuRect = null;
   if (game.time - game.overAt > 0.8) {
     const blink = 0.5 + 0.5 * Math.sin(game.time * 3.5);
-    txt(ctx, 'ENTER — reiniciar    ESC — menu', W / 2, H * 0.82, 17,
-      'rgba(255,255,255,' + (0.4 + blink * 0.6) + ')', 'center');
+    // botões clicáveis/tocáveis
+    const bw = Math.min(170, W * 0.38), bh = 44, gap = 16;
+    const by = Math.min(H * 0.78, H - 70);
+    const rx = W / 2 - bw - gap / 2, mx2 = W / 2 + gap / 2;
+    game.goMenuRect = { x: mx2, y: by, w: bw, h: bh };
+
+    ctx.strokeStyle = 'rgba(140,240,255,' + (0.5 + blink * 0.5) + ')';
+    ctx.fillStyle = 'rgba(10,22,40,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(rx, by, bw, bh); ctx.strokeRect(rx, by, bw, bh);
+    txt(ctx, 'REINICIAR', rx + bw / 2, by + bh / 2 + 5, 15, 'rgba(255,255,255,' + (0.6 + blink * 0.4) + ')', 'center');
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(mx2, by, bw, bh); ctx.strokeRect(mx2, by, bw, bh);
+    txt(ctx, 'MENU', mx2 + bw / 2, by + bh / 2 + 5, 15, 'rgba(255,255,255,0.65)', 'center');
+
+    if (!Input.touchMode) {
+      txt(ctx, 'ENTER — reiniciar    ESC — menu', W / 2, Math.min(by + bh + 26, H - 12), 12,
+        'rgba(255,255,255,0.35)', 'center');
+    }
   }
 }
 
@@ -288,6 +454,7 @@ function drawOverlays(ctx) {
 
 // ---------- retícula ----------
 function drawReticle(ctx) {
+  if (Input.touchMode) return; // no toque não há cursor
   const mx = Input.mouse.x, my = Input.mouse.y;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';

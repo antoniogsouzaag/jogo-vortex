@@ -9,6 +9,8 @@ class AudioEngine {
   constructor() {
     this.ctx = null;
     this.muted = localStorage.getItem('vortex_mute') === '1';
+    const v = parseFloat(localStorage.getItem('vortex_vol'));
+    this.volume = Number.isFinite(v) ? clamp(v, 0, 1) : 1;
     this.intensity = 0; // 0 silêncio, 1 leve, 2 combate, 3 caos/chefe
     this.step = 0;
     this.nextTime = 0;
@@ -21,7 +23,7 @@ class AudioEngine {
     const ctx = this.ctx = new AC();
 
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.55;
+    this.master.gain.value = this._gainTarget();
     this.master.connect(ctx.destination);
 
     this.comp = ctx.createDynamicsCompressor();
@@ -58,8 +60,29 @@ class AudioEngine {
   toggleMute() {
     this.muted = !this.muted;
     localStorage.setItem('vortex_mute', this.muted ? '1' : '0');
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.55;
+    this._applyGain();
     return this.muted;
+  }
+
+  // curva quadrática: percepção de volume mais natural no slider
+  _gainTarget() { return this.muted ? 0 : 0.55 * this.volume * this.volume; }
+
+  _applyGain() {
+    if (!this.master) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setTargetAtTime(this._gainTarget(), t, 0.04);
+  }
+
+  setVolume(v) {
+    this.volume = clamp(v, 0, 1);
+    localStorage.setItem('vortex_vol', this.volume.toFixed(2));
+    if (this.muted && this.volume > 0) {
+      this.muted = false;
+      localStorage.setItem('vortex_mute', '0');
+    }
+    this._applyGain();
+    return this.volume;
   }
 
   setIntensity(v) { this.intensity = v; }
@@ -74,7 +97,7 @@ class AudioEngine {
   }
 
   tone(o) {
-    if (!this.ctx || this.muted) return;
+    if (!this.ctx || this.muted || this.volume <= 0) return;
     const { type = 'sine', f = 440, f1 = 0, t = this.ctx.currentTime, dur = 0.2,
             vol = 0.2, dest = null, filter = 0, echo = 0 } = o;
     const osc = this.ctx.createOscillator();
@@ -95,7 +118,7 @@ class AudioEngine {
   }
 
   noise(o) {
-    if (!this.ctx || this.muted) return;
+    if (!this.ctx || this.muted || this.volume <= 0) return;
     const { t = this.ctx.currentTime, dur = 0.2, vol = 0.25, type = 'lowpass',
             f = 1200, f1 = 0, Q = 0.8, dest = null, echo = 0 } = o;
     const src = this.ctx.createBufferSource();
@@ -199,7 +222,7 @@ class AudioEngine {
   }
 
   _playStep(s, t, s16) {
-    const I = this.muted ? 0 : this.intensity;
+    const I = (this.muted || this.volume <= 0) ? 0 : this.intensity;
     if (I <= 0) return;
     const bar = (s >> 4) & 3, st = s & 15;
     // progressão: Am — F — G — C (lá menor)

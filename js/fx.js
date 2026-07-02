@@ -338,7 +338,7 @@ class Starfield {
 // ---------- vinheta ----------
 function makeVignette(w, h) {
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = Math.max(1, w); c.height = Math.max(1, h);
   const g = c.getContext('2d');
   const gr = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.36, w / 2, h / 2, Math.max(w, h) * 0.72);
   gr.addColorStop(0, 'rgba(0,0,10,0)');

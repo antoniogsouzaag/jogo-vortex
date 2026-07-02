@@ -2,6 +2,29 @@
 
 Jogo arcade em HTML5 Canvas + JavaScript puro (sem build, sem dependências).
 
+## Controles
+
+**Desktop**
+
+| Tecla | Ação |
+|---|---|
+| WASD / setas | mover |
+| Mouse | mirar e atirar |
+| Espaço | dash evasivo |
+| Shift | câmbio temporal (câmera lenta) |
+| Botão direito / Q | pulso gravitacional |
+| M | silenciar |
+| − / + | volume |
+| P / Esc | pausa |
+
+**Celular e tablet (toque)**
+
+- Arraste na metade **esquerda** da tela: direcional virtual de movimento.
+- Arraste na metade **direita**: mira e atira na direção do arrasto.
+- Sem mirar, a nave **atira sozinha** no inimigo mais próximo.
+- Botões na tela: **DASH**, **PULSO**, **FOCO** (segurar p/ câmera lenta) e pausa.
+- Volume ajustável pelo slider no menu e na tela de pausa.
+
 ## Rodar localmente
 
 Basta abrir o `index.html` no navegador. Se algo não carregar por causa de
