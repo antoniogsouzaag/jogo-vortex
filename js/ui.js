@@ -269,7 +269,7 @@ function drawMenu(ctx) {
 function drawDebugTouch(ctx) {
   if (!game.debugTouch) return;
   const d = Input.dbg;
-  const l1 = 'ptr:' + (Input.ptrPath ? 'sim' : 'nao') +
+  const l1 = 'via:' + (Input.touchPrimary ? 'toque' : Input.ptrPath ? 'ptr' : 'mouse') +
     '  pd:' + d.pd + ' pm:' + d.pm + ' pu:' + d.pu + ' pc:' + d.pc +
     '  ts:' + d.ts + ' tm:' + d.tm + ' rl:' + d.rl;
   const l2 = 'move:' + Input.move.id + ' aim:' + Input.aim.id + ' ui:' + Input.uiTouch +

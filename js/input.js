@@ -7,9 +7,13 @@
 //
 // Os ouvintes de toque ficam em window/document — não no canvas —
 // para funcionar mesmo quando o navegador entrega o evento com
-// outro alvo (overlays, barras injetadas, WebViews). O caminho
-// principal é Pointer Events; Touch Events são fallback e servem
-// para bloquear rolagem/zoom/cliques sintéticos.
+// outro alvo (overlays, barras injetadas, WebViews). No toque, os
+// Touch Events são o caminho PRIMÁRIO (o fluxo contínuo de
+// touchmove é confiável nos navegadores móveis; o de pointermove
+// morre/vira pointercancel em vários aparelhos reais, matando os
+// direcionais enquanto os botões — que só precisam do down —
+// continuam funcionando). Pointer Events cobrem aparelhos sem
+// Touch Events e alimentam os contadores de diagnóstico.
 // ============================================================
 
 const Input = {
@@ -30,7 +34,8 @@ const Input = {
   // contadores de eventos para o modo diagnóstico (5 toques no "v4" do menu)
   // rl = liberações de toques fantasmas (fins de toque perdidos)
   dbg: { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0, rl: 0 },
-  ptrPath: false, // true = usando Pointer Events
+  ptrPath: false,      // true = Pointer Events disponíveis no aparelho
+  touchPrimary: false, // vira true no 1º touchstart: Touch Events assumem
 
   init(canvas) {
     this.canvas = canvas;
@@ -81,8 +86,8 @@ const Input = {
       addEventListener('pointercancel', e => this._pu(e));
     }
     // no document (não no canvas): bloqueia o gesto padrão do navegador
-    // (rolagem, pull-to-refresh, zoom) seja qual for o alvo do toque —
-    // é isso que impede o pointercancel de matar os direcionais
+    // (rolagem, pull-to-refresh, zoom) seja qual for o alvo do toque, e
+    // a partir do 1º touchstart vira a fonte primária dos controles
     document.addEventListener('touchstart', e => this._ts(e), { passive: false });
     document.addEventListener('touchmove',  e => this._tm(e), { passive: false });
     addEventListener('touchend',    e => this._te(e));
@@ -241,10 +246,14 @@ const Input = {
     }
   },
 
-  // ---------- Pointer Events (caminho principal) ----------
+  // ---------- Pointer Events (fallback + diagnóstico) ----------
+  // Quando touchPrimary está ligado, só contam eventos para o modo
+  // diagnóstico — a lógica roda nos Touch Events, cujo id é de outro
+  // espaço (pointerId ≠ touch.identifier).
   _pd(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
     this.dbg.pd++;
+    if (this.touchPrimary) return;
     const r = this.canvas.getBoundingClientRect();
     this._touchStart(e.pointerId, e.clientX - r.left, e.clientY - r.top);
   },
@@ -252,6 +261,7 @@ const Input = {
   _pm(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
     this.dbg.pm++;
+    if (this.touchPrimary) return;
     const r = this.canvas.getBoundingClientRect();
     this._touchMove(e.pointerId, e.clientX - r.left, e.clientY - r.top);
   },
@@ -259,17 +269,24 @@ const Input = {
   _pu(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
     this.dbg[e.type === 'pointercancel' ? 'pc' : 'pu']++;
+    if (this.touchPrimary) return;
     this._touchEnd(e.pointerId);
   },
 
-  // ---------- Touch Events (bloqueio de gesto + fallback) ----------
+  // ---------- Touch Events (caminho primário no toque) ----------
   _ts(e) {
     e.preventDefault();
     this.dbg.ts++;
+    if (!this.touchPrimary) {
+      // primeiro toque real: Touch Events assumem o comando e o que o
+      // caminho de ponteiros tiver marcado é descartado (ids trocam de
+      // espaço; o toque atual é reatribuído já na linha de baixo)
+      this.touchPrimary = true;
+      this.releaseAll();
+    }
     // e.touches é a lista autoritativa de dedos na tela: se este toque
     // é o único, qualquer slot antigo ainda marcado é fantasma
     if (e.touches.length === 1) this._releaseStale();
-    if (this.ptrPath) return; // a lógica já rodou via Pointer Events
     const r = this.canvas.getBoundingClientRect();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
@@ -280,7 +297,7 @@ const Input = {
   _tm(e) {
     e.preventDefault();
     this.dbg.tm++;
-    if (this.ptrPath) return;
+    if (!this.touchPrimary) return;
     const r = this.canvas.getBoundingClientRect();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
@@ -290,9 +307,9 @@ const Input = {
 
   _te(e) {
     // nenhum dedo na tela vale mais que qualquer estado interno: limpa
-    // tudo (cura pointerup/pointercancel que o navegador não entregou)
+    // tudo (cura fins de toque que o navegador não entregou)
     if (e.touches.length === 0) this.releaseAll();
-    if (this.ptrPath) return;
+    if (!this.touchPrimary) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       this._touchEnd(e.changedTouches[i].identifier);
     }
