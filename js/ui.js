@@ -103,27 +103,6 @@ function drawTouchControls(ctx) {
   if (!Input.touchMode) return;
   ctx.save();
 
-  // dicas de onde tocar, nos primeiros segundos da partida
-  if (game.state === 'playing' && game.runTime < 7) {
-    const a = clamp(7 - game.runTime, 0, 1) * 0.4;
-    const hy = H - SAFE.b - Input.stickR - 150;
-    const hints = [
-      [Input.move, W * 0.25, 'MOVER'],
-      [Input.aim,  W * 0.75, 'MIRAR · ATIRAR'],
-    ];
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([6, 8]);
-    for (const [s, hx, label] of hints) {
-      if (s.id >= 0) continue; // some assim que o jogador usa
-      ctx.globalAlpha = a;
-      ctx.strokeStyle = 'rgba(140,220,255,0.9)';
-      ctx.beginPath(); ctx.arc(hx, hy, Input.stickR * 0.85, 0, TAU); ctx.stroke();
-      txt(ctx, label, hx, hy + Input.stickR * 0.85 + 20, 12, 'rgba(160,220,255,0.9)', 'center', false, a);
-    }
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-  }
-
   // direcionais flutuantes
   for (const s of [Input.move, Input.aim]) {
     if (s.id < 0) continue;
@@ -273,8 +252,6 @@ function drawMenu(ctx) {
     txt(ctx, desc, cx + 10, y, rowSize, 'rgba(255,255,255,0.75)');
     y += rowStep;
   }
-  if (Input.touchMode) txt(ctx, 'sem mirar, a nave atira sozinha no alvo mais próximo', cx, y + 4, 11, 'rgba(160,220,255,0.55)', 'center');
-
   if (game.best > 0) txt(ctx, 'RECORDE  ' + fmtScore(game.best), cx, y + 26, 16, '#ffd54d', 'center');
 
   const blink = 0.5 + 0.5 * Math.sin(t * 3.5);
@@ -285,7 +262,23 @@ function drawMenu(ctx) {
 
   txt(ctx, 'arte, física e áudio 100% procedurais — sem engine, sem bibliotecas, sem assets',
     cx, H - 18 - SAFE.b, 11, 'rgba(255,255,255,0.3)', 'center');
-  txt(ctx, 'v3', 12, H - 18 - SAFE.b, 10, 'rgba(255,255,255,0.3)');
+  txt(ctx, 'v4', 12, H - 18 - SAFE.b, 10, 'rgba(255,255,255,0.3)');
+}
+
+// ---------- diagnóstico de toque (5 toques no "v4" do menu) ----------
+function drawDebugTouch(ctx) {
+  if (!game.debugTouch) return;
+  const d = Input.dbg;
+  const l1 = 'ptr:' + (Input.ptrPath ? 'sim' : 'nao') +
+    '  pd:' + d.pd + ' pm:' + d.pm + ' pu:' + d.pu + ' pc:' + d.pc +
+    '  ts:' + d.ts + ' tm:' + d.tm;
+  const l2 = 'move:' + Input.move.id + ' aim:' + Input.aim.id + ' ui:' + Input.uiTouch +
+    '  ' + W + 'x' + H + ' dpr:' + (window.devicePixelRatio || 1).toFixed(2) +
+    ' modo:' + game.state;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(8, 68, 330, 38);
+  txt(ctx, l1, 14, 84, 10, '#8ef7ff');
+  txt(ctx, l2, 14, 98, 10, '#8ef7ff');
 }
 
 // ---------- cartas de melhoria ----------

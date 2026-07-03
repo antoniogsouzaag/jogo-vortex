@@ -5,9 +5,11 @@
 // direita mira/atira) e botões de ação (dash, pulso, foco,
 // pausa). Fora do jogo, toques viram cliques de interface.
 //
-// O toque usa Pointer Events (padrão moderno, confiável em
-// todos os navegadores móveis); Touch Events ficam só como
-// fallback para navegadores antigos sem PointerEvent.
+// Os ouvintes de toque ficam em window/document — não no canvas —
+// para funcionar mesmo quando o navegador entrega o evento com
+// outro alvo (overlays, barras injetadas, WebViews). O caminho
+// principal é Pointer Events; Touch Events são fallback e servem
+// para bloquear rolagem/zoom/cliques sintéticos.
 // ============================================================
 
 const Input = {
@@ -24,8 +26,13 @@ const Input = {
   buttons: [],   // preenchido por layoutTouch(W, H)
   uiTouch: -1,   // toque tratado como clique de interface
   _lastTouchT: -1e9, // instante do último evento de toque
+  // contadores de eventos para o modo diagnóstico (5 toques no "v4" do menu)
+  dbg: { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0 },
+  ptrPath: false, // true = usando Pointer Events
 
   init(canvas) {
+    this.canvas = canvas;
+
     addEventListener('keydown', e => {
       if (!e.repeat) { this.keys.add(e.code); this.pressed.add(e.code); }
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
@@ -55,23 +62,24 @@ const Input = {
     });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    if (window.PointerEvent) {
-      // caminho principal: Pointer Events (toque e caneta)
-      canvas.addEventListener('pointerdown', e => this._pd(e, canvas));
-      canvas.addEventListener('pointermove', e => this._pm(e, canvas));
+    // reforço via JS caso alguma folha de estilo não seja aplicada
+    canvas.style.touchAction = 'none';
+    document.body.style.touchAction = 'none';
+
+    this.ptrPath = !!window.PointerEvent;
+    if (this.ptrPath) {
+      addEventListener('pointerdown', e => this._pd(e));
+      addEventListener('pointermove', e => this._pm(e));
       addEventListener('pointerup', e => this._pu(e));
       addEventListener('pointercancel', e => this._pu(e));
-      // ainda é preciso cancelar os Touch Events para bloquear
-      // rolagem, zoom e cliques sintéticos do navegador
-      canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
-      canvas.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
-    } else {
-      // fallback: Touch Events clássicos
-      canvas.addEventListener('touchstart', e => this._ts(e, canvas), { passive: false });
-      canvas.addEventListener('touchmove',  e => this._tm(e, canvas), { passive: false });
-      addEventListener('touchend',    e => this._te(e));
-      addEventListener('touchcancel', e => this._te(e));
     }
+    // no document (não no canvas): bloqueia o gesto padrão do navegador
+    // (rolagem, pull-to-refresh, zoom) seja qual for o alvo do toque —
+    // é isso que impede o pointercancel de matar os direcionais
+    document.addEventListener('touchstart', e => this._ts(e), { passive: false });
+    document.addEventListener('touchmove',  e => this._tm(e), { passive: false });
+    addEventListener('touchend',    e => this._te(e));
+    addEventListener('touchcancel', e => this._te(e));
   },
 
   // posiciona botões de toque; chamado a cada resize.
@@ -98,6 +106,11 @@ const Input = {
       if (dist2(x, y, b.x, b.y) < b.r * b.r * 1.7) return b;
     }
     return null;
+  },
+
+  _isButtonTouch(id) {
+    for (const b of this.buttons) if (b.tid === id) return true;
+    return false;
   },
 
   // ---------- lógica compartilhada de toque ----------
@@ -136,6 +149,11 @@ const Input = {
     if (id === this.move.id) { this.move.x = x; this.move.y = y; }
     else if (id === this.aim.id) { this.aim.x = x; this.aim.y = y; }
     else if (id === this.uiTouch) { this.mouse.x = x; this.mouse.y = y; }
+    else if (this._playing() && !this._isButtonTouch(id)) {
+      // autocura: o início deste toque se perdeu (evento descartado
+      // pelo navegador) — adota o toque a partir daqui
+      this._touchStart(id, x, y);
+    }
   },
 
   _touchEnd(id) {
@@ -152,36 +170,43 @@ const Input = {
   },
 
   // ---------- Pointer Events (caminho principal) ----------
-  _pd(e, canvas) {
+  _pd(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
-    const r = canvas.getBoundingClientRect();
+    this.dbg.pd++;
+    const r = this.canvas.getBoundingClientRect();
     this._touchStart(e.pointerId, e.clientX - r.left, e.clientY - r.top);
   },
 
-  _pm(e, canvas) {
+  _pm(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
-    const r = canvas.getBoundingClientRect();
+    this.dbg.pm++;
+    const r = this.canvas.getBoundingClientRect();
     this._touchMove(e.pointerId, e.clientX - r.left, e.clientY - r.top);
   },
 
   _pu(e) {
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+    this.dbg[e.type === 'pointercancel' ? 'pc' : 'pu']++;
     this._touchEnd(e.pointerId);
   },
 
-  // ---------- Touch Events (fallback) ----------
-  _ts(e, canvas) {
+  // ---------- Touch Events (bloqueio de gesto + fallback) ----------
+  _ts(e) {
     e.preventDefault();
-    const r = canvas.getBoundingClientRect();
+    this.dbg.ts++;
+    if (this.ptrPath) return; // a lógica já rodou via Pointer Events
+    const r = this.canvas.getBoundingClientRect();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
       this._touchStart(t.identifier, t.clientX - r.left, t.clientY - r.top);
     }
   },
 
-  _tm(e, canvas) {
+  _tm(e) {
     e.preventDefault();
-    const r = canvas.getBoundingClientRect();
+    this.dbg.tm++;
+    if (this.ptrPath) return;
+    const r = this.canvas.getBoundingClientRect();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
       this._touchMove(t.identifier, t.clientX - r.left, t.clientY - r.top);
@@ -189,6 +214,7 @@ const Input = {
   },
 
   _te(e) {
+    if (this.ptrPath) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       this._touchEnd(e.changedTouches[i].identifier);
     }

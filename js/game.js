@@ -31,6 +31,7 @@ const game = {
   waveMods: { hp: 1, spd: 1 },
   stats: { shots: 0, hits: 0 },
   volRect: null, muteRect: null, volDrag: false, goMenuRect: null,
+  debugTouch: false, _dbgN: 0, _dbgT: 0,
 
   addShake(v) { this.shake = Math.min(1, this.shake + v); },
   flashScreen(r, g, b, a) { this.flash = { r, g, b, a }; },
@@ -145,6 +146,22 @@ function startGame() {
 // para toques frenéticos da partida não pularem a tela de morte
 function overDelay() { return Input.touchMode ? 1.5 : 0.8; }
 
+// 5 toques rápidos no "v4" (canto inferior esquerdo do menu) ligam o
+// diagnóstico de toque na tela — útil para depurar em celular real
+function debugTapHandled() {
+  if (!Input.was('Mouse0')) return false;
+  if (Input.mouse.x > 45 || Input.mouse.y < H - 45 - SAFE.b) return false;
+  if (game.time - game._dbgT > 2.5) game._dbgN = 0;
+  game._dbgT = game.time;
+  game._dbgN++;
+  if (game._dbgN >= 5) {
+    game._dbgN = 0;
+    game.debugTouch = !game.debugTouch;
+    addFloater(W / 2, H * 0.3, game.debugTouch ? 'DIAGNÓSTICO LIGADO' : 'DIAGNÓSTICO DESLIGADO', '#8ef7ff', 14);
+  }
+  return true;
+}
+
 // ---------- volume ----------
 function nudgeVolume(d) {
   const v = AudioSys.setVolume(clamp(AudioSys.volume + d, 0, 1));
@@ -201,7 +218,7 @@ function update(dt, rdt) {
           color: pick([COL.player, COL.vortex, COL.drifter]), size: 3, life: rand(1, 2), drag: 1,
         });
       }
-      const uiUsed = volumeUIHandled();
+      const uiUsed = volumeUIHandled() || debugTapHandled();
       if (Input.was('Enter') || Input.was('Space') || (!uiUsed && Input.was('Mouse0'))) {
         AudioSys.init();
         startGame();
@@ -359,6 +376,7 @@ function render() {
   }
 
   drawBanner(ctx);
+  drawDebugTouch(ctx);
   drawReticle(ctx);
 }
 

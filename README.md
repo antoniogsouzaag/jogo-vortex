@@ -21,7 +21,6 @@ Jogo arcade em HTML5 Canvas + JavaScript puro (sem build, sem dependências).
 
 - Arraste na metade **esquerda** da tela: direcional virtual de movimento.
 - Arraste na metade **direita**: mira e atira na direção do arrasto.
-- Sem mirar, a nave **atira sozinha** no inimigo mais próximo.
 - Botões na tela: **DASH**, **PULSO**, **FOCO** (segurar p/ câmera lenta) e pausa.
 - Volume ajustável pelo slider no menu e na tela de pausa.
 

@@ -58,19 +58,6 @@ class SpatialHash {
 const enemyHash = new SpatialHash(90);
 const _qbuf = [];
 
-// alvo mais próximo (inimigos e chefe) — usado pela mira assistida no toque
-function nearestTarget(x, y, range) {
-  let best = null, bd = range * range;
-  for (const e of enemies) {
-    if (e.dead || e.spawnT > 0) continue;
-    const d = dist2(x, y, e.x, e.y);
-    if (d < bd) { bd = d; best = e; }
-  }
-  const B = game.boss;
-  if (B && !B.dead && B.vulnerable && dist2(x, y, B.x, B.y) < bd) best = B;
-  return best;
-}
-
 // ---------- jogador ----------
 function xpFor(l) { return Math.floor(10 + l * 7 + l * l * 0.6); }
 
@@ -98,16 +85,14 @@ class Player {
   update(dt) {
     const rdt = game.rdt;
 
-    // mira: toque usa o direcional direito (ou mira assistida); desktop usa o mouse
-    let autoFire = false;
+    // mira: toque usa o direcional direito (atira enquanto deflete);
+    // desktop usa o mouse
+    let touchFire = false;
     if (Input.touchMode) {
       const av = Input.aimVec();
       if (av.mag > 0.25) {
         this.angle = Math.atan2(av.y, av.x);
-        autoFire = true;
-      } else {
-        const tgt = nearestTarget(this.x, this.y, 900);
-        if (tgt) { this.angle = angleTo(this.x, this.y, tgt.x, tgt.y); autoFire = true; }
+        touchFire = true;
       }
     } else {
       this.angle = angleTo(this.x, this.y, Input.mouse.x, Input.mouse.y);
@@ -170,7 +155,7 @@ class Player {
 
     // tiro
     this.fireCd -= dt;
-    const wantFire = autoFire || (!Input.touchMode && Input.mouse.down);
+    const wantFire = touchFire || (!Input.touchMode && Input.mouse.down);
     if (wantFire && this.fireCd <= 0 && this.dashT <= 0) this.fire();
 
     // integra e limita à arena
