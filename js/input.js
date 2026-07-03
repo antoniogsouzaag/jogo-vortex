@@ -21,13 +21,15 @@ const Input = {
   coarse: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
   touchMode: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
   stickR: 64,
-  move: { id: -1, ox: 0, oy: 0, x: 0, y: 0 },
-  aim:  { id: -1, ox: 0, oy: 0, x: 0, y: 0 },
+  move: { id: -1, ox: 0, oy: 0, x: 0, y: 0, at: 0 },
+  aim:  { id: -1, ox: 0, oy: 0, x: 0, y: 0, at: 0 },
   buttons: [],   // preenchido por layoutTouch(W, H)
   uiTouch: -1,   // toque tratado como clique de interface
+  uiAt: 0,       // instante em que o uiTouch foi marcado
   _lastTouchT: -1e9, // instante do último evento de toque
   // contadores de eventos para o modo diagnóstico (5 toques no "v4" do menu)
-  dbg: { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0 },
+  // rl = liberações de toques fantasmas (fins de toque perdidos)
+  dbg: { pd: 0, pm: 0, pu: 0, pc: 0, ts: 0, tm: 0, rl: 0 },
   ptrPath: false, // true = usando Pointer Events
 
   init(canvas) {
@@ -38,7 +40,12 @@ const Input = {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
     });
     addEventListener('keyup', e => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    // ao perder o foco/visibilidade, o navegador engole os eventos de
+    // fim — solta teclado E toques, senão os direcionais ficam presos
+    addEventListener('blur', () => { this.keys.clear(); this.releaseAll(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { this.keys.clear(); this.releaseAll(); }
+    });
 
     // mouse clássico (dispara por botão — necessário para atirar e
     // usar o pulso ao mesmo tempo). Alguns navegadores móveis geram
@@ -87,16 +94,20 @@ const Input = {
   // "segurar" (FOCO) presas quando a tela gira no meio de um toque.
   layoutTouch(w, h, safe = { t: 0, b: 0, r: 0 }) {
     const prev = {};
-    for (const b of this.buttons) prev[b.code] = b.tid;
+    for (const b of this.buttons) prev[b.code] = b;
     const r = clamp(Math.min(w, h) * 0.075, 30, 44);
     this.stickR = clamp(Math.min(w, h) * 0.13, 48, 72);
     const bx = w - safe.r, by = h - safe.b;
     this.buttons = [
-      { code: 'Space',     label: 'DASH',  hold: false, x: bx - r - 22,        y: by - r - 24,       r: r * 1.12, tid: prev['Space'] ?? -1 },
-      { code: 'KeyQ',      label: 'PULSO', hold: false, x: bx - r * 3.4 - 26,  y: by - r * 0.9 - 20, r: r * 0.9,  tid: prev['KeyQ'] ?? -1 },
-      { code: 'ShiftLeft', label: 'FOCO',  hold: true,  x: bx - r * 0.9 - 20,  y: by - r * 3.4 - 26, r: r * 0.8,  tid: prev['ShiftLeft'] ?? -1 },
-      { code: 'KeyP',      icon: 'pause',  hold: false, x: bx - 32,            y: 118 + safe.t,      r: 22,       tid: prev['KeyP'] ?? -1 },
+      { code: 'Space',     label: 'DASH',  hold: false, x: bx - r - 22,        y: by - r - 24,       r: r * 1.12, tid: -1, at: 0 },
+      { code: 'KeyQ',      label: 'PULSO', hold: false, x: bx - r * 3.4 - 26,  y: by - r * 0.9 - 20, r: r * 0.9,  tid: -1, at: 0 },
+      { code: 'ShiftLeft', label: 'FOCO',  hold: true,  x: bx - r * 0.9 - 20,  y: by - r * 3.4 - 26, r: r * 0.8,  tid: -1, at: 0 },
+      { code: 'KeyP',      icon: 'pause',  hold: false, x: bx - 32,            y: 118 + safe.t,      r: 22,       tid: -1, at: 0 },
     ];
+    for (const b of this.buttons) {
+      const p = prev[b.code];
+      if (p) { b.tid = p.tid; b.at = p.at; }
+    }
   },
 
   _playing() { return typeof game !== 'undefined' && game.state === 'playing'; },
@@ -113,31 +124,83 @@ const Input = {
     return false;
   },
 
+  // solta todos os toques rastreados — usado quando o navegador engole
+  // eventos de fim (troca de aba, gesto do sistema, tela desligada).
+  // Sem isso, um único pointerup perdido deixa move.id/aim.id presos e
+  // os direcionais morrem para sempre (os botões sobrevivem porque
+  // sobrescrevem o próprio tid a cada toque novo).
+  releaseAll() {
+    const had = this.move.id !== -1 || this.aim.id !== -1 || this.uiTouch !== -1 ||
+      this.buttons.some(b => b.tid !== -1);
+    if (had) this.dbg.rl++;
+    this.move.id = -1;
+    this.aim.id = -1;
+    this.uiTouch = -1;
+    this.mouse.down = false;
+    this.mouse.rdown = false;
+    for (const b of this.buttons) {
+      if (b.tid !== -1 && b.hold) this.keys.delete(b.code);
+      b.tid = -1;
+    }
+  },
+
+  // um dedo recém-chegado é o único na tela ⇒ qualquer slot antigo é
+  // fantasma de um fim perdido. Poupa o que acabou de ser marcado (o
+  // pointerdown gêmeo deste mesmo toque chega milissegundos antes do
+  // touchstart).
+  _releaseStale() {
+    const now = performance.now(), AGE = 150;
+    let had = false;
+    if (this.move.id !== -1 && now - this.move.at > AGE) { this.move.id = -1; had = true; }
+    if (this.aim.id !== -1 && now - this.aim.at > AGE) { this.aim.id = -1; had = true; }
+    if (this.uiTouch !== -1 && now - this.uiAt > AGE) {
+      this.uiTouch = -1; this.mouse.down = false; had = true;
+    }
+    for (const b of this.buttons) {
+      if (b.tid !== -1 && now - b.at > AGE) {
+        if (b.hold) this.keys.delete(b.code);
+        b.tid = -1; had = true;
+      }
+    }
+    if (had) this.dbg.rl++;
+  },
+
   // ---------- lógica compartilhada de toque ----------
-  _touchStart(id, x, y) {
+  // adopted = toque cujo início se perdeu ou que veio da interface:
+  // pode virar direcional, mas não aciona botões (evita PULSO/pausa
+  // fantasmas de um dedo que só estava passando por cima)
+  _touchStart(id, x, y, adopted = false) {
     this.touchMode = true;
     this._lastTouchT = performance.now();
+    // navegadores (iOS em especial) reutilizam pointerId/identifier:
+    // se este id ainda consta como ativo, o fim anterior se perdeu —
+    // solta o slot velho antes de atribuir o toque novo
+    this._touchEnd(id);
     AudioSys.init();
     if (this._playing()) {
-      const b = this._hitButton(x, y);
+      const b = adopted ? null : this._hitButton(x, y);
       if (b) {
         b.tid = id;
+        b.at = this._lastTouchT;
         if (b.hold) this.keys.add(b.code); else this.pressed.add(b.code);
       } else if (x < innerWidth * 0.5) {
         // lado esquerdo é só movimento: um 2º toque à esquerda não pode
         // virar mira (evita tiros fantasma de palma/apoio da mão)
         if (this.move.id < 0) {
           this.move.id = id;
+          this.move.at = this._lastTouchT;
           this.move.ox = this.move.x = x;
           this.move.oy = this.move.y = y;
         }
       } else if (this.aim.id < 0) {
         this.aim.id = id;
+        this.aim.at = this._lastTouchT;
         this.aim.ox = this.aim.x = x;
         this.aim.oy = this.aim.y = y;
       }
     } else {
       this.uiTouch = id;
+      this.uiAt = this._lastTouchT;
       this.mouse.x = x; this.mouse.y = y;
       this.mouse.down = true;
       this.pressed.add('Mouse0');
@@ -146,13 +209,22 @@ const Input = {
 
   _touchMove(id, x, y) {
     this._lastTouchT = performance.now();
+    if (id === this.uiTouch && this._playing()) {
+      // o dedo que tocou em "iniciar"/despausar/carta continua na tela:
+      // ao arrastar durante o jogo, vira controle em vez de ficar preso
+      // como clique de interface até ser levantado
+      this.uiTouch = -1;
+      this.mouse.down = false;
+      this._touchStart(id, x, y, true);
+      return;
+    }
     if (id === this.move.id) { this.move.x = x; this.move.y = y; }
     else if (id === this.aim.id) { this.aim.x = x; this.aim.y = y; }
     else if (id === this.uiTouch) { this.mouse.x = x; this.mouse.y = y; }
     else if (this._playing() && !this._isButtonTouch(id)) {
       // autocura: o início deste toque se perdeu (evento descartado
       // pelo navegador) — adota o toque a partir daqui
-      this._touchStart(id, x, y);
+      this._touchStart(id, x, y, true);
     }
   },
 
@@ -194,6 +266,9 @@ const Input = {
   _ts(e) {
     e.preventDefault();
     this.dbg.ts++;
+    // e.touches é a lista autoritativa de dedos na tela: se este toque
+    // é o único, qualquer slot antigo ainda marcado é fantasma
+    if (e.touches.length === 1) this._releaseStale();
     if (this.ptrPath) return; // a lógica já rodou via Pointer Events
     const r = this.canvas.getBoundingClientRect();
     for (let i = 0; i < e.changedTouches.length; i++) {
@@ -214,6 +289,9 @@ const Input = {
   },
 
   _te(e) {
+    // nenhum dedo na tela vale mais que qualquer estado interno: limpa
+    // tudo (cura pointerup/pointercancel que o navegador não entregou)
+    if (e.touches.length === 0) this.releaseAll();
     if (this.ptrPath) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       this._touchEnd(e.changedTouches[i].identifier);

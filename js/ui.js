@@ -271,7 +271,7 @@ function drawDebugTouch(ctx) {
   const d = Input.dbg;
   const l1 = 'ptr:' + (Input.ptrPath ? 'sim' : 'nao') +
     '  pd:' + d.pd + ' pm:' + d.pm + ' pu:' + d.pu + ' pc:' + d.pc +
-    '  ts:' + d.ts + ' tm:' + d.tm;
+    '  ts:' + d.ts + ' tm:' + d.tm + ' rl:' + d.rl;
   const l2 = 'move:' + Input.move.id + ' aim:' + Input.aim.id + ' ui:' + Input.uiTouch +
     '  ' + W + 'x' + H + ' dpr:' + (window.devicePixelRatio || 1).toFixed(2) +
     ' modo:' + game.state;
